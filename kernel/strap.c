@@ -76,7 +76,7 @@ void rrsched() {
   // TIME_SLICE_LEN (means it has consumed its time slice), change its status into READY,
   // place it in the rear of ready queue, and finally schedule next process to run.
   //panic( "You need to further implement the timer handling in lab3_3.\n" );
-  if(current->tick_count >= TIME_SLICE_LEN) {
+  if(current->tick_count+1 >= TIME_SLICE_LEN) {
     current->tick_count = 0;
     insert_to_ready_queue(current);
     schedule();
