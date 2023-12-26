@@ -164,22 +164,24 @@ int free_process( process* proc ) {
   // but for proxy kernel, it (memory leaking) may NOT be a really serious issue,
   // as it is different from regular OS, which needs to run 7x24.
   proc->status = ZOMBIE;
-
+//add @lab_3_c1 
+//ljh 在free_process的时候，判断是否father是blocked，且它在等待自己，提醒其苏醒
+  when_free_notify_parent(proc);
   return 0;
 }
 
-//
+
 // implements fork syscal in kernel. added @lab3_1
 // basic idea here is to first allocate an empty process (child), then duplicate the
 // context and data segments of parent process to the child, and lastly, map other
 // segments (code, system) of the parent to child. the stack segment remains unchanged
 // for the child.
-//
+
 int do_fork( process* parent)
 {
   sprint( "will fork a child from parent %d.\n", parent->pid );
   process* child = alloc_process();
-
+         int free_block_filter[MAX_HEAP_PAGES];
   for( int i=0; i<parent->total_mapped_region; i++ ){
     // browse parent's vm space, and copy its trapframe and data segments,
     // map its code segment.
@@ -191,36 +193,35 @@ int do_fork( process* parent)
         memcpy( (void*)lookup_pa(child->pagetable, child->mapped_info[STACK_SEGMENT].va),
           (void*)lookup_pa(parent->pagetable, parent->mapped_info[i].va), PGSIZE );
         break;
-      case HEAP_SEGMENT:
-        // build a same heap for child process.
+    case HEAP_SEGMENT:
+         // build a same heap for child process.
+ 
+         // convert free_pages_address into a filter to skip reclaimed blocks in the heap
+         // when mapping the heap blocks
 
-        // convert free_pages_address into a filter to skip reclaimed blocks in the heap
-        // when mapping the heap blocks
-        int free_block_filter[MAX_HEAP_PAGES];
-        memset(free_block_filter, 0, MAX_HEAP_PAGES);
-        uint64 heap_bottom = parent->user_heap.heap_bottom;
-        for (int i = 0; i < parent->user_heap.free_pages_count; i++) {
-          int index = (parent->user_heap.free_pages_address[i] - heap_bottom) / PGSIZE;
+         memset(free_block_filter, 0, MAX_HEAP_PAGES);
+         uint64 heap_bottom = parent->user_heap.heap_bottom;
+         for (int i = 0; i < parent->user_heap.free_pages_count; i++) {
+           int index = (parent->user_heap.free_pages_address[i] - heap_bottom) / PGSIZE;
           free_block_filter[index] = 1;
-        }
-
-        // copy and map the heap blocks
-        for (uint64 heap_block = current->user_heap.heap_bottom;
-             heap_block < current->user_heap.heap_top; heap_block += PGSIZE) {
-          if (free_block_filter[(heap_block - heap_bottom) / PGSIZE])  // skip free blocks
-            continue;
-
-          void* child_pa = alloc_page();
-          memcpy(child_pa, (void*)lookup_pa(parent->pagetable, heap_block), PGSIZE);
-          user_vm_map((pagetable_t)child->pagetable, heap_block, PGSIZE, (uint64)child_pa,
-                      prot_to_type(PROT_WRITE | PROT_READ, 1));
-        }
-
-        child->mapped_info[HEAP_SEGMENT].npages = parent->mapped_info[HEAP_SEGMENT].npages;
-
-        // copy the heap manager from parent to child
+         }
+ 
+         // copy and map the heap blocks
+         for (uint64 heap_block = current->user_heap.heap_bottom;
+              heap_block < current->user_heap.heap_top; heap_block += PGSIZE) {
+           if (free_block_filter[(heap_block - heap_bottom) / PGSIZE])  // skip free blocks
+             continue;
+ 
+           void* child_pa = alloc_page();
+           memcpy(child_pa, (void*)lookup_pa(parent->pagetable, heap_block), PGSIZE);
+           user_vm_map((pagetable_t)child->pagetable, heap_block, PGSIZE, (uint64)child_pa,
+                       prot_to_type(PROT_WRITE | PROT_READ, 1));         }
+ 
+         child->mapped_info[HEAP_SEGMENT].npages = parent->mapped_info[HEAP_SEGMENT].npages;
+ 
+         // copy the heap manager from parent to child
         memcpy((void*)&child->user_heap, (void*)&parent->user_heap, sizeof(parent->user_heap));
-        break;
+         break;
       case CODE_SEGMENT:
         // TODO (lab3_1): implment the mapping of child code segment to parent's
         // code segment.
@@ -231,8 +232,8 @@ int do_fork( process* parent)
         // address region of child to the physical pages that actually store the code
         // segment of parent process.
         // DO NOT COPY THE PHYSICAL PAGES, JUST MAP THEM.
-        panic( "You need to implement the code segment mapping of child in lab3_1.\n" );
-
+        //panic( "You need to implement the code segment mapping of child in lab3_1.\n" );
+        map_pages(child->pagetable,parent->mapped_info[i].va,parent->mapped_info[i].npages *PGSIZE,lookup_pa(parent->pagetable,parent->mapped_info[i].va),prot_to_type(PROT_EXEC|PROT_READ,1));
         // after mapping, register the vm region (do not delete codes below!)
         child->mapped_info[child->total_mapped_region].va = parent->mapped_info[i].va;
         child->mapped_info[child->total_mapped_region].npages =
@@ -240,6 +241,22 @@ int do_fork( process* parent)
         child->mapped_info[child->total_mapped_region].seg_type = CODE_SEGMENT;
         child->total_mapped_region++;
         break;
+        case DATA_SEGMENT:
+        //LJH ADD lab3 c1 与code段类似，但是需要映射新的地址空间(数据段不共用),即相同的虚拟空间va映射到不同的物理地址pa
+        //由于对于parent的pagetable addr每一个可能在不同位置，因此，一页页的map
+        for(int j=0;j<parent->mapped_info[i].npages;j++) {
+            uint64 va = parent->mapped_info[i].va+j*PGSIZE;
+            uint64 old_addr = lookup_pa(parent->pagetable,va);
+            void* pa = alloc_page();
+            memcpy(pa,(void *)old_addr,PGSIZE);
+            map_pages(child->pagetable,va,PGSIZE,pa,prot_to_type(PROT_EXEC|PROT_READ,1));
+        }
+        // after mapping, register the vm region (do not delete codes below!)
+        child->mapped_info[child->total_mapped_region].va = parent->mapped_info[i].va;
+        child->mapped_info[child->total_mapped_region].npages =
+          parent->mapped_info[i].npages;
+        child->mapped_info[child->total_mapped_region].seg_type = DATA_SEGMENT;
+        child->total_mapped_region++;        
     }
   }
 
@@ -249,4 +266,50 @@ int do_fork( process* parent)
   insert_to_ready_queue( child );
 
   return child->pid;
+}
+
+
+int do_wait(process* parent,int pid) {
+    //pid == -1 随机退出一个子进程，遍历进程表,找到父进程为parent且为zombie的进程,否则加入blocked进程
+    if( -1 == pid) {
+        int have_son = -1;
+        for(int i=0;i<NPROC;++i) {
+            if(procs[i].parent == parent ){
+                have_son = 1;
+                if(ZOMBIE == procs[i].status) {
+                    procs[i].status = FREE;
+                    return procs[i].pid;
+                }
+            }
+        }
+        //no son
+        if(have_son == -1) {
+            return -1;
+        }
+        insert_to_block_queue(current,-1);
+        schedule();
+        return 0;
+    } else if(pid > 0 && pid<NPROC) {
+        int found = -1;
+        for(int i=0;i<NPROC;++i) {
+            if(procs[i].pid == pid) {
+                found = 1;
+                if(procs[i].parent != parent) return -1;
+                if(ZOMBIE == procs[i].status) {
+                    procs[i].status = FREE;
+                    return procs[i].pid;
+                }
+                //设置当前进程的等待pid
+
+                insert_to_block_queue(current,pid);
+                schedule();
+                return 0;
+            }
+        }
+        if(~found) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
 }

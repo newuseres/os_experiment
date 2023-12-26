@@ -89,9 +89,15 @@ ssize_t sys_user_yield() {
   // hint: the functionality of yield is to give up the processor. therefore,
   // we should set the status of currently running process to READY, insert it in
   // the rear of ready queue, and finally, schedule a READY process to run.
-  panic( "You need to implement the yield syscall in lab3_2.\n" );
-
+  //panic( "You need to implement the yield syscall in lab3_2.\n" );
+    insert_to_ready_queue(current);
+    schedule();
   return 0;
+}
+
+//ljh
+ssize_t sys_user_wait(int pid) {
+    return do_wait(current,pid);
 }
 
 //
@@ -113,6 +119,8 @@ long do_syscall(long a0, long a1, long a2, long a3, long a4, long a5, long a6, l
       return sys_user_fork();
     case SYS_user_yield:
       return sys_user_yield();
+    case SYS_user_wait:
+      return sys_user_wait(a1);
     default:
       panic("Unknown syscall %ld \n", a0);
   }

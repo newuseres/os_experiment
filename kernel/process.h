@@ -87,6 +87,9 @@ typedef struct process_t {
   // next queue element
   struct process_t *queue_next;
 
+  //正在等待的 process id ljhADD in @lab3_c1 ,当waiting_pid == -1时，说明其在等待任意一个进程
+  uint64 wating_pid;
+
   // accounting. added @lab3_3
   int tick_count;
 }process;
@@ -103,6 +106,7 @@ int free_process( process* proc );
 // fork a child from parent
 int do_fork(process* parent);
 
+int do_wait(process* parent,int pid);
 // current running process
 extern process* current;
 

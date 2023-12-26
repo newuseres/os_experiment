@@ -6,6 +6,7 @@
 #include "spike_interface/spike_utils.h"
 
 process* ready_queue_head = NULL;
+process* blocked_queue_head = NULL;
 
 //
 // insert a process, proc, into the END of ready queue.
@@ -33,6 +34,49 @@ void insert_to_ready_queue( process* proc ) {
   proc->queue_next = NULL;
 
   return;
+}
+
+
+//ljh add procs into wating list
+void insert_to_block_queue( process* proc ,int64 wating_pid) {
+  if(blocked_queue_head  == NULL ){
+    proc->status = READY;
+    proc->queue_next = NULL;
+    blocked_queue_head = proc;
+    return;
+  }   
+  process *p;
+  // browse the ready queue to see if proc is already in-queue
+  for( p=blocked_queue_head; p->queue_next!=NULL; p=p->queue_next )
+    if( p == proc ) return;  //already in queue
+
+  // p points to the last element of the ready queue
+  if( p==proc ) return;
+  p->queue_next = proc;
+  proc->status = BLOCKED;
+  proc->wating_pid = wating_pid;
+  proc->queue_next = NULL;  
+}
+
+//当一个proc准备free的时候，提醒其父节点是否正在wait自己,将其移出block队列
+void when_free_notify_parent(process* proc ) {
+    if(blocked_queue_head==NULL || proc->parent==NULL) return;
+    process *p;
+    if(blocked_queue_head == proc->parent) {
+        p = blocked_queue_head;
+        blocked_queue_head = blocked_queue_head->queue_next;
+        insert_to_ready_queue(p);
+        return;
+    }
+    process *temp;
+    for(p=blocked_queue_head;p->queue_next!=NULL;p=p->queue_next) {
+        if(p->queue_next==proc->parent) {
+            temp = p->queue_next;
+            p->queue_next = p->queue_next->queue_next;
+            insert_to_ready_queue(temp);
+            return;
+        }
+    }
 }
 
 //
